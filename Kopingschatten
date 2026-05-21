@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Chat Pro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system;
+      background: #000;
+      color: white;
+    }
+
+    #status {
+      font-size: 12px;
+      opacity: 0.6;
+      padding: 5px 10px;
+    }
+
+    #chat {
+      height: 78vh;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .msg {
+      max-width: 70%;
+      padding: 10px 14px;
+      border-radius: 18px;
+      margin: 5px;
+      word-wrap: break-word;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .me { background: #007aff; align-self: flex-end; }
+    .other { background: #2c2c2e; align-self: flex-start; }
+
+    .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .name {
+      font-size: 12px;
+      opacity: 0.6;
+      margin-bottom: 2px;
+    }
+
+    .time {
+      font-size: 11px;
+      opacity: 0.6;
+      margin-top: 5px;
+      text-align: right;
+    }
+
+    img {
+      max-width: 100%;
+      border-radius: 10px;
+      margin-top: 5px;
+    }
+
+    #inputArea {
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+      display: flex;
+      background: #111;
+      padding: 10px;
+      box-sizing: border-box;
+    }
+
+    input[type=text] {
+      flex: 1;
+      padding: 10px;
+      border-radius: 20px;
+      border: none;
+      background: #1c1c1e;
+      color: white;
+      margin-right: 5px;
+    }
+
+    input[type=file] {
+      max-width: 80px;
+    }
+
+    button {
+      background: #007aff;
+      border: none;
+      border-radius: 20px;
+      padding: 10px;
+      color: white;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="status"></div>
+  <div id="chat"></div>
+
+  <div id="inputArea">
+    <input type="text" id="msg" placeholder="Message..." />
+    <input type="file" id="imgInput" />
+    <button onclick="send()">➤</button>
+  </div>
+
+  <audio id="notifySound" src="https://www.soundjay.com/buttons/sounds/button-3.mp3"></audio>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getDatabase, ref, push, set, onChildAdded, onValue } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+    /* 🔥 FIREBASE CONFIG */
+    const firebaseConfig = {
+      apiKey: "AIzaSyB_TpFod1870IUmR3rY6XpbIf8dm4E2R3I",
+      authDomain: "torchatt-9dec8.firebaseapp.com",
+      databaseURL: "https://torchatt-9dec8-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "torchatt-9dec8",
+      storageBucket: "torchatt-9dec8.appspot.com",
+      messagingSenderId: "933481017831",
+      appId: "1:933481017831:web:ea260f3d34b75028ad8d42",
+      measurementId: "G-16YQ4VF89M"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    /* 🔥 AVATARER */
+    const avatars = {
+      "Dev": "https://i.sstatic.net/l60Hf.png",
+      "Admin": "https://i.imgur.com/8QfQ2YB.png",
+      "Gäst": "https://i.imgur.com/1XKQFQh.png"
+    };
+
+    /* 🔥 HÅRDKODAD RUMKOD */
+    let room = "67";
+    localStorage.setItem("room", room);
+
+    const chatRef = ref(db, "rooms/" + room + "/messages");
+    const usersRef = ref(db, "rooms/" + room + "/users");
+    const typingRef = ref(db, "rooms/" + room + "/typing");
+
+    /* 🔥 FRÅGA EFTER ANVÄNDARNAMN */
+    let username = localStorage.getItem("username");
+
+    if (!username) {
+      username = prompt("Välj ett användarnamn:");
+      if (!username || username.trim() === "") {
+        username = "Gäst" + Math.floor(Math.random() * 1000);
+      }
+      localStorage.setItem("username", username);
+    }
+
+    /* 🔥 STANDARD-AVATAR FÖR NYA NAMN */
+    if (!avatars[username]) {
+      avatars[username] = "https://i.imgur.com/1XKQFQh.png";
+    }
+
+    /* 🔥 REGISTRERA ANVÄNDAREN SOM ONLINE */
+    set(ref(db, "rooms/" + room + "/users/" + username), true);
+
+    const notifySound = document.getElementById("notifySound");
+    const baseTitle = "Chat Pro";
+    const lastReadKey = "lastRead_" + room + "_" + username;
+
+    let unreadCount = 0;
+    let allMessages = {};
+    let onlineMembersText = "";
+
+    function markAsRead() {
+      localStorage.setItem(lastReadKey, Date.now());
+      unreadCount = 0;
+      updateTitle();
+      updateStatus();
+    }
+
+    function getLastRead() {
+      return Number(localStorage.getItem(lastReadKey) || 0);
+    }
+
+    function countUnread() {
+      const lastRead = getLastRead();
+      unreadCount = 0;
+
+      Object.values(allMessages).forEach(d => {
+        if (d.user !== username && d.createdAt && d.createdAt > lastRead) {
+          unreadCount++;
+        }
+      });
+
+      updateTitle();
+      updateStatus();
+    }
+
+    function updateTitle() {
+      document.title = unreadCount > 0 ? `(${unreadCount}) ${baseTitle}` : baseTitle;
+    }
+
+    function updateStatus(customText = null) {
+      let text = customText || ("Member: " + onlineMembersText);
+      if (unreadCount > 0) {
+        text += ` | Oöppnade: ${unreadCount}`;
+      }
+      document.getElementById("status").innerText = text;
+    }
+
+    document.getElementById("msg").addEventListener("input", () => {
+      set(ref(db, "rooms/" + room + "/typing/" + username), true);
+      setTimeout(() => set(ref(db, "rooms/" + room + "/typing/" + username), false), 1000);
+    });
+
+    if ("Notification" in window && Notification.permission !== "granted") {
+      Notification.requestPermission();
+    }
+
+    /* 🔥 SKICKA MEDDELANDE */
+    window.send = function() {
+      const text = document.getElementById("msg").value.trim();
+      const file = document.getElementById("imgInput").files[0];
+      const messageTime = new Date().toLocaleString();
+      const createdAt = Date.now();
+
+      if (!text && !file) return;
+
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          push(chatRef, {
+            user: username,
+            img: e.target.result,
+            time: messageTime,
+            createdAt: createdAt,
+            avatar: avatars[username]
+          });
+        };
+        reader.readAsDataURL(file);
+      }
+
+      if (text) {
+        push(chatRef, {
+          user: username,
+          msg: text,
+          time: messageTime,
+          createdAt: createdAt,
+          avatar: avatars[username]
+        });
+      }
+
+      document.getElementById("msg").value = "";
+      document.getElementById("imgInput").value = "";
+
+      if (!document.hidden) {
+        markAsRead();
+      }
+    };
+
+    /* 🔥 VISA MEDDELANDEN */
+    onChildAdded(chatRef, (data) => {
+      const d = data.val();
+      const key = data.key;
+      allMessages[key] = d;
+
+      const div = document.createElement("div");
+      div.className = "msg " + (d.user === username ? "me" : "other");
+
+      let content = `
+        <img class="avatar" src="${d.avatar}">
+        <div style="flex:1">
+          <div class="name">${d.user}</div>
+      `;
+
+      if (d.msg) content += `<div>${d.msg}</div>`;
+      if (d.img) content += `<img src="${d.img}">`;
+      if (d.time) content += `<div class="time">${d.time}</div>`;
+
+      content += `</div>`;
+      div.innerHTML = content;
+
+      document.getElementById("chat").appendChild(div);
+      document.getElementById("chat").scrollTop = 999999;
+
+      if (d.user !== username) {
+        if (document.hidden) {
+          countUnread();
+        } else {
+          markAsRead();
+        }
+
+        if (Notification.permission === "granted") {
+          new Notification(d.user, {
+            body: d.msg || "📷 Bild skickad",
+            icon: d.avatar
+          });
+          notifySound.play();
+        }
+      }
+    });
+
+    onValue(usersRef, (snap) => {
+      const users = snap.val() || {};
+      onlineMembersText = Object.keys(users).join(", ");
+      updateStatus();
+    });
+
+    onValue(typingRef, (snap) => {
+      const t = snap.val() || {};
+      const typingUsers = Object.keys(t).filter(u => t[u] && u !== username);
+
+      if (typingUsers.length) {
+        updateStatus(typingUsers.join(", ") + " skriver...");
+      } else {
+        updateStatus();
+      }
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        markAsRead();
+      } else {
+        countUnread();
+      }
+    });
+
+    window.addEventListener("focus", () => {
+      markAsRead();
+    });
+
+    window.addEventListener("load", () => {
+      if (!document.hidden) {
+        markAsRead();
+      } else {
+        countUnread();
+      }
+    });
+  </script>
+</body>
+</html>
