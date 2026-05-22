@@ -139,7 +139,7 @@
     };
 
     /* 🔥 HÅRDKODAD RUMKOD */
-    let room = "1";
+    let room = "67";
     localStorage.setItem("room", room);
 
     const chatRef = ref(db, "rooms/" + room + "/messages");
@@ -147,7 +147,7 @@
     const typingRef = ref(db, "rooms/" + room + "/typing");
 
     /* 🔥 FRÅGA EFTER ANVÄNDARNAMN */
-    let username = localStorage.getItem("username");
+    let username = "Mappinnehåll"
 
     if (!username) {
       username = prompt("Välj ett användarnamn:");
